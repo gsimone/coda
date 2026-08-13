@@ -1,0 +1,202 @@
+<!doctype html>
+<!-- coda: overlapping compass arcs on warm paper, as if someone kept measuring until the marks themselves became the picture. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>locus</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: oklch(0.22 0.012 70);
+  }
+  canvas {
+    display: block;
+    width: min(92vw, calc(92vh * 0.70703)) !important;
+    height: auto !important;
+    box-shadow: 0 18px 60px oklch(0 0 0 / 0.45), 0 2px 8px oklch(0 0 0 / 0.35);
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+</head>
+<body>
+<script>
+// oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+function oklch(L, C, H) {
+  const h = (H * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((x) => {
+    const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  });
+}
+
+const SEED = 47;
+const W = 794, H = 1123;
+const M = Math.round(W * 0.07);
+const IX0 = M, IY0 = M, IX1 = W - M, IY1 = H - M;
+
+// quiet field + loud accent
+const PAPER  = oklch(0.965, 0.012, 85);
+const INK    = oklch(0.28, 0.040, 50);
+const MID    = oklch(0.52, 0.035, 70);
+const COOL   = oklch(0.48, 0.070, 245);
+const ACCENT = oklch(0.60, 0.170, 35);
+const SIGN   = oklch(0.62, 0.020, 85);
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(2);
+  randomSeed(SEED);
+  noiseSeed(SEED);
+  noLoop();
+  drawSheet();
+}
+
+function drawSheet() {
+  background(...PAPER);
+  noFill();
+  strokeCap(ROUND);
+  strokeJoin(ROUND);
+
+  const loci = [
+    { x: lerp(IX0, IX1, 0.38), y: lerp(IY0, IY1, 0.42), n: 86, cool: 0.18 },
+    { x: lerp(IX0, IX1, 0.62), y: lerp(IY0, IY1, 0.36), n: 64, cool: 0.42 },
+    { x: lerp(IX0, IX1, 0.48), y: lerp(IY0, IY1, 0.68), n: 72, cool: 0.08 },
+    { x: lerp(IX0, IX1, 0.22), y: lerp(IY0, IY1, 0.58), n: 38, cool: 0.55 },
+  ];
+
+  for (const loc of loci) {
+    loc.x += random(-18, 18);
+    loc.y += random(-22, 22);
+  }
+
+  for (const loc of loci) {
+    drawLocus(loc);
+  }
+
+  // a few long spanning arcs that ignore the hubs
+  for (let i = 0; i < 7; i++) {
+    const cx = random(IX0 - 80, IX1 + 80);
+    const cy = random(IY0 - 80, IY1 + 80);
+    const r = random(220, 520);
+    const a0 = random(TWO_PI);
+    const sweep = random(0.35, 1.1);
+    stroke(...COOL, 48);
+    strokeWeight(0.55);
+    clippedArc(cx, cy, r, a0, a0 + sweep);
+  }
+
+  // two accent bearings — under 10% of the ink
+  const accentFrom = loci[0];
+  stroke(...ACCENT, 190);
+  strokeWeight(1.15);
+  clippedArc(accentFrom.x, accentFrom.y, 268, 0.42, 0.42 + 1.15);
+  stroke(...ACCENT, 130);
+  strokeWeight(0.7);
+  clippedArc(loci[2].x, loci[2].y, 194, 4.1, 4.1 + 0.72);
+
+  // pinprick centers
+  noStroke();
+  for (const loc of loci) {
+    fill(...INK, 180);
+    circle(loc.x, loc.y, 2.4);
+    noFill();
+    stroke(...INK, 70);
+    strokeWeight(0.4);
+    circle(loc.x, loc.y, 7);
+    noStroke();
+  }
+
+  noStroke();
+  fill(...SIGN);
+  textFont("ui-serif, Georgia, serif");
+  textSize(10);
+  textAlign(CENTER, BOTTOM);
+  text("locus · 2026-08-13 · claude", W / 2, H - M * 0.38);
+}
+
+function drawLocus(loc) {
+  const maxR = random(160, 310);
+  for (let i = 0; i < loc.n; i++) {
+    const t = i / (loc.n - 1);
+    const r = lerp(18, maxR, Math.pow(t, 0.82) + random(-0.02, 0.02));
+    const a0 = random(TWO_PI);
+    const full = random() < 0.06;
+    const sweep = full ? TWO_PI : random(0.28, 1.85);
+    const cool = random() < loc.cool;
+    const [col, a] = cool
+      ? [COOL, random(40, 90)]
+      : random() < 0.35
+        ? [MID, random(28, 62)]
+        : [INK, random(36, 95)];
+    stroke(...col, a);
+    strokeWeight(random() < 0.12 ? 1.05 : 0.55);
+    clippedArc(loc.x, loc.y, r, a0, a0 + sweep);
+
+    if (random() < 0.14) {
+      drawTicks(loc.x, loc.y, r, a0, a0 + sweep, col);
+    }
+  }
+}
+
+function drawTicks(cx, cy, r, a0, a1, col) {
+  const n = floor(random(4, 11));
+    stroke(...col, 70);
+    strokeWeight(0.4);
+  for (let i = 0; i <= n; i++) {
+    const a = lerp(a0, a1, i / n);
+    const x0 = cx + Math.cos(a) * (r - 3.5);
+    const y0 = cy + Math.sin(a) * (r - 3.5);
+    const x1 = cx + Math.cos(a) * (r + 3.5);
+    const y1 = cy + Math.sin(a) * (r + 3.5);
+    if (inside(x0, y0) && inside(x1, y1)) line(x0, y0, x1, y1);
+  }
+}
+
+function clippedArc(cx, cy, r, a0, a1) {
+  const steps = Math.max(8, Math.ceil(Math.abs(a1 - a0) * r * 0.35));
+  let drawing = false;
+  for (let i = 0; i <= steps; i++) {
+    const a = lerp(a0, a1, i / steps);
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (inside(x, y)) {
+      if (!drawing) {
+        beginShape();
+        drawing = true;
+      }
+      vertex(x, y);
+    } else if (drawing) {
+      endShape();
+      drawing = false;
+    }
+  }
+  if (drawing) endShape();
+}
+
+function inside(x, y) {
+  return x >= IX0 && x <= IX1 && y >= IY0 && y <= IY1;
+}
+
+function mousePressed() {
+  if (mouseX < IX0 || mouseX > IX1 || mouseY < IY0 || mouseY > IY1) return;
+  drawLocus({ x: mouseX, y: mouseY, n: 28, cool: 0.3 });
+  noStroke();
+  fill(...INK, 180);
+  circle(mouseX, mouseY, 2.4);
+}
+</script>
+</body>
+</html>

@@ -12,3 +12,4 @@ Made with the [coda skill](https://github.com/gsimone/skills).
 | --- | --- | --- |
 | 2026-08-13 | murmur | a starling murmuration as drifting ink — the flock writes and erases itself, and your cursor is a falcon |
 | 2026-08-13 | wayfinders | four wayfinders sweep disjoint territories of one sheet; every orphan gets a single thread back to its hub |
+| 2026-08-13 | locus | overlapping compass arcs on warm paper, as if someone kept measuring until the marks themselves became the picture |
