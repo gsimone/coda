@@ -1,0 +1,326 @@
+<!doctype html>
+<!-- A single closed loop that can never cross itself, grown until it has folded into every corner of the sheet. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>folded line</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #dfdcd6;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        aspect-ratio: 794 / 1123;
+        max-height: 94vh;
+        max-width: min(94vw, calc(94vh / 1.41435));
+        height: auto;
+        width: auto;
+        box-shadow:
+          0 1px 2px rgba(40, 36, 30, 0.18),
+          0 12px 34px rgba(40, 36, 30, 0.22);
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      // oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const a = C * Math.cos(h),
+          b = C * Math.sin(h);
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+        const l = l_ ** 3,
+          m = m_ ** 3,
+          s = s_ ** 3;
+        const lin = [
+          +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((x) => {
+          const v =
+            x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+          return Math.round(Math.min(1, Math.max(0, v)) * 255);
+        });
+      }
+
+      const W = 794,
+        H = 1123;
+      const SEED = 11;
+
+      // Lightness ramp, hue drifting a touch cooler as the line ages outward.
+      const PAPER = oklch(0.966, 0.012, 86);
+      const GRAIN = oklch(0.885, 0.014, 84);
+      const INK_OLD = oklch(0.29, 0.075, 276);
+      const INK_NEW = oklch(0.74, 0.045, 214);
+      const SIG = oklch(0.6, 0.018, 268);
+
+      // The loop lives inside these bounds; everything outside is silence.
+      const M = 82;
+      const BOTTOM = 1043; // extra room below for the signature line
+      const L = M,
+        R = W - M,
+        T = M,
+        B = BOTTOM;
+
+      const SEG = 4.8; // rest length between neighbours
+      const RAD = 12; // repulsion radius — sets the gap between folds
+      const RAD2 = RAD * RAD;
+      const SPRING = 0.28; // holds spacing at SEG without contracting the loop
+      const SMOOTH = 0.09; // light Laplacian, only to take the jitter off
+      const REPULSE = 1.35;
+      const EDGE = 0.6;
+      const NOISE_SCALE = 0.0026;
+      const GROWTH = 0.03; // new points per point per step
+      const CROWDED = 10; // neighbours within RAD that mean "no room here"
+      const RELAX_PER_STEP = 2; // let the folds spread before more length arrives
+      const MAX_PTS = 19000;
+      const TOTAL_STEPS = 660;
+      const PER_FRAME = 2;
+
+      let pts = [];
+      let step = 0;
+      let maxAge = 1e-6;
+      let paper;
+      let grid = new Map();
+      const CELL = RAD;
+      const COLS = Math.ceil(W / CELL);
+
+      function setup() {
+        const c = createCanvas(W, H);
+        c.parent(document.body);
+        pixelDensity(2);
+        randomSeed(SEED);
+        noiseSeed(SEED);
+
+        paper = createGraphics(W, H);
+        paper.pixelDensity(2);
+        paper.background(...PAPER);
+        paper.noStroke();
+        // Faint tooth, so the sheet reads as paper rather than screen.
+        for (let i = 0; i < 22000; i++) {
+          paper.fill(...GRAIN, random(6, 16));
+          const x = random(W),
+            y = random(H);
+          paper.circle(x, y, random(0.6, 1.5));
+        }
+
+        // Seed ring at the centre of the live area.
+        const cx = (L + R) / 2,
+          cy = (T + B) / 2;
+        const r0 = 158;
+        const n0 = Math.max(24, Math.round((TWO_PI * r0) / SEG));
+        for (let i = 0; i < n0; i++) {
+          const a = (i / n0) * TWO_PI;
+          const wob = 1 + 0.12 * noise(Math.cos(a) * 1.4 + 5, Math.sin(a) * 1.4 + 5);
+          pts.push({
+            x: cx + Math.cos(a) * r0 * wob,
+            y: cy + Math.sin(a) * r0 * 1.12 * wob,
+            age: 0,
+          });
+        }
+        strokeJoin(ROUND);
+        strokeCap(ROUND);
+      }
+
+      function cellKey(x, y) {
+        return ((y / CELL) | 0) * COLS + ((x / CELL) | 0);
+      }
+
+      function buildGrid() {
+        grid.clear();
+        for (const p of pts) {
+          const k = cellKey(p.x, p.y);
+          let bucket = grid.get(k);
+          if (!bucket) grid.set(k, (bucket = []));
+          bucket.push(p);
+        }
+      }
+
+      function neighbourCount(p) {
+        const gx = (p.x / CELL) | 0,
+          gy = (p.y / CELL) | 0;
+        let c = 0;
+        for (let ox = -1; ox <= 1; ox++) {
+          for (let oy = -1; oy <= 1; oy++) {
+            const bucket = grid.get((gy + oy) * COLS + (gx + ox));
+            if (!bucket) continue;
+            for (const q of bucket) {
+              if (q === p) continue;
+              const dx = p.x - q.x,
+                dy = p.y - q.y;
+              if (dx * dx + dy * dy <= RAD2) c++;
+            }
+          }
+        }
+        return c;
+      }
+
+      function relax() {
+        buildGrid();
+        const n = pts.length;
+        const fx = new Float64Array(n),
+          fy = new Float64Array(n);
+
+        for (let i = 0; i < n; i++) {
+          const p = pts[i];
+          const prev = pts[(i - 1 + n) % n],
+            next = pts[(i + 1) % n];
+
+          // Springs at a rest length, not a pull toward the midpoint: the loop
+          // keeps even spacing without quietly shrinking itself away.
+          for (const q of [prev, next]) {
+            const dx = q.x - p.x,
+              dy = q.y - p.y;
+            const d = Math.hypot(dx, dy) || 1e-6;
+            const f = ((d - SEG) / d) * SPRING;
+            fx[i] += dx * f;
+            fy[i] += dy * f;
+          }
+
+          // A touch of smoothing so the line stays a line, not a zigzag.
+          fx[i] += ((prev.x + next.x) * 0.5 - p.x) * SMOOTH;
+          fy[i] += ((prev.y + next.y) * 0.5 - p.y) * SMOOTH;
+
+          // Mutual repulsion is what turns surplus length into folds.
+          const gx = (p.x / CELL) | 0,
+            gy = (p.y / CELL) | 0;
+          let rx = 0,
+            ry = 0;
+          for (let ox = -1; ox <= 1; ox++) {
+            for (let oy = -1; oy <= 1; oy++) {
+              const bucket = grid.get((gy + oy) * COLS + (gx + ox));
+              if (!bucket) continue;
+              for (const q of bucket) {
+                if (q === p) continue;
+                const dx = p.x - q.x,
+                  dy = p.y - q.y;
+                const d2 = dx * dx + dy * dy;
+                if (d2 > RAD2 || d2 === 0) continue;
+                const d = Math.sqrt(d2);
+                const w = 1 - d / RAD;
+                rx += (dx / d) * w * w;
+                ry += (dy / d) * w * w;
+              }
+            }
+          }
+          fx[i] += rx * REPULSE;
+          fy[i] += ry * REPULSE;
+
+          // Soft walls, so the fold crowds the margin without crossing it.
+          if (p.x < L) fx[i] += (L - p.x) * EDGE;
+          if (p.x > R) fx[i] += (R - p.x) * EDGE;
+          if (p.y < T) fy[i] += (T - p.y) * EDGE;
+          if (p.y > B) fy[i] += (B - p.y) * EDGE;
+        }
+
+        for (let i = 0; i < n; i++) {
+          pts[i].x += fx[i];
+          pts[i].y += fy[i];
+        }
+      }
+
+      function resample(t) {
+        const n = pts.length;
+
+        // Subdivide anything stretched past the rest length.
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const p = pts[i],
+            q = pts[(i + 1) % n];
+          out.push(p);
+          if (pts.length + out.length < MAX_PTS) {
+            const dx = q.x - p.x,
+              dy = q.y - p.y;
+            if (dx * dx + dy * dy > SEG * SEG * 2.25) {
+              out.push({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, age: t });
+              maxAge = t;
+            }
+          }
+        }
+        pts = out;
+
+        // Then inject new length at a steady rate, with noise choosing *where*.
+        // The unevenness of that choice is the whole shape of the folding.
+        let budget = Math.max(1, Math.round(pts.length * GROWTH));
+        let guard = budget * 12;
+        while (budget > 0 && guard-- > 0 && pts.length < MAX_PTS) {
+          const i = (random() * pts.length) | 0;
+          const p = pts[i],
+            q = pts[(i + 1) % pts.length];
+          // Length only goes where the line still has room: inserting into a
+          // saturated interior just compacts it, and the fold can never undo it.
+          if (neighbourCount(p) > CROWDED) continue;
+          const bias = noise((p.x + 1000) * NOISE_SCALE, (p.y + 1000) * NOISE_SCALE);
+          if (random() > bias) continue;
+          pts.splice(i + 1, 0, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, age: t });
+          maxAge = t;
+          budget--;
+        }
+
+        // Cull crowding so the point count stays bounded.
+        const kept = [];
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i],
+            q = pts[(i + 1) % pts.length];
+          const dx = q.x - p.x,
+            dy = q.y - p.y;
+          if (dx * dx + dy * dy < SEG * SEG * 0.16 && kept.length > 60 && i % 2 === 0) continue;
+          kept.push(p);
+        }
+        pts = kept;
+      }
+
+      function drawLine() {
+        image(paper, 0, 0);
+        const n = pts.length;
+        noFill();
+
+        // Two passes: a wide, faint one for the bloom ink leaves in paper, then
+        // the crisp line on top.
+        for (const pass of [0, 1]) {
+          strokeWeight(pass === 0 ? 2.6 : 0.85);
+          for (let i = 0; i < n; i++) {
+            const p = pts[i],
+              q = pts[(i + 1) % n];
+            const a = Math.min(1, p.age / maxAge);
+            const r = lerp(INK_OLD[0], INK_NEW[0], a);
+            const g = lerp(INK_OLD[1], INK_NEW[1], a);
+            const b = lerp(INK_OLD[2], INK_NEW[2], a);
+            stroke(r, g, b, pass === 0 ? 15 : 235);
+            line(p.x, p.y, q.x, q.y);
+          }
+        }
+
+        noStroke();
+        fill(...SIG);
+        textSize(10.5);
+        textAlign(LEFT, BASELINE);
+        textFont("Georgia, 'Times New Roman', serif");
+        text("folded line · 2026-08-13 · claude", M, H - 40);
+      }
+
+      function draw() {
+        for (let k = 0; k < PER_FRAME && step < TOTAL_STEPS; k++) {
+          for (let r = 0; r < RELAX_PER_STEP; r++) relax();
+          resample(step / TOTAL_STEPS);
+          step++;
+        }
+        if (step >= TOTAL_STEPS || frameCount % 3 === 0) drawLine();
+        if (step >= TOTAL_STEPS) {
+          noLoop();
+          window.__codaDone = true;
+        }
+      }
+    </script>
+  </body>
+</html>
