@@ -1,0 +1,249 @@
+<!doctype html>
+<!-- coda: a starling murmuration as drifting ink on warm paper — the flock writes and erases itself, and your cursor is a falcon. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>murmur</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: oklch(0.28 0.015 260);
+  }
+  canvas {
+    display: block;
+    width: min(92vw, calc(92vh * 0.70703)) !important;
+    height: auto !important;
+    box-shadow: 0 18px 60px oklch(0 0 0 / 0.45), 0 2px 8px oklch(0 0 0 / 0.35);
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+</head>
+<body>
+<script>
+// oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+function oklch(L, C, H) {
+  const h = (H * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((x) => {
+    const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  });
+}
+
+// ---- sheet ----
+const SEED = 613;
+const W = 794, H = 1123;          // A4 at 96dpi
+const M = 60;                     // margin: the silence
+const IX0 = M, IY0 = M, IX1 = W - M, IY1 = H - M;
+
+// ---- palette: quiet field + loud accent ----
+const PAPER  = oklch(0.97, 0.012, 90);   // warm paper
+const INK    = oklch(0.28, 0.035, 265);  // indigo ink
+const FAINT  = oklch(0.55, 0.030, 255);  // faded gray-blue
+const ACCENT = oklch(0.62, 0.160, 50);   // burnt orange, rare
+const SIGN   = oklch(0.62, 0.020, 90);   // pencil gray
+
+// ---- flock ----
+const N = 2200;
+const PERCEPT = 26, SEP = 13;
+const MAXSPEED = 2.7, MAXFORCE = 0.055;
+const CELL = PERCEPT;
+const COLS = Math.ceil(W / CELL), ROWS = Math.ceil(H / CELL);
+let birds = [];
+let startle = null; // {x, y, t}
+let trail;          // transparent buffer: strokes decay to true zero here
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(2);
+  randomSeed(SEED);
+  noiseSeed(SEED);
+  background(...PAPER);
+
+  trail = createGraphics(W, H);
+  trail.pixelDensity(2);
+  trail.clear();
+  trail.strokeCap(ROUND);
+
+  // signature, once — the fade never touches the margins
+  noStroke();
+  fill(...SIGN);
+  textFont('Georgia');
+  textSize(11);
+  textAlign(CENTER, CENTER);
+  text('murmur · 2026-08-13 · claude', W / 2, H - M / 2);
+
+  for (let i = 0; i < N; i++) {
+    const a = random(TWO_PI);
+    const r = random();
+    birds.push({
+      x: random(IX0 + 80, IX1 - 80),
+      y: random(IY0 + 80, IY1 - 80),
+      vx: Math.cos(a) * random(1, MAXSPEED),
+      vy: Math.sin(a) * random(1, MAXSPEED),
+      tone: r < 0.02 ? 2 : r < 0.45 ? 1 : 0, // faint / ink / accent
+    });
+  }
+}
+
+function mouseInSheet() {
+  // p5 mouseX/Y are in CSS pixels of the scaled canvas; map back to sheet space
+  const rect = drawingContext.canvas.getBoundingClientRect();
+  const k = W / rect.width;
+  const mx = mouseX * k, my = mouseY * k;
+  if (mx < 0 || my < 0 || mx > W || my > H) return null;
+  return { x: mx, y: my };
+}
+
+function mousePressed() {
+  const m = mouseInSheet();
+  if (m) startle = { x: m.x, y: m.y, t: frameCount };
+}
+
+function draw() {
+  // the flock erases itself: multiplicative alpha decay, back to true paper
+  trail.erase(14, 14);
+  trail.noStroke();
+  trail.rect(IX0, IY0, IX1 - IX0, IY1 - IY0);
+  trail.noErase();
+
+  // spatial hash
+  const grid = new Array(COLS * ROWS);
+  for (const b of birds) {
+    const ci = Math.floor(b.x / CELL), cj = Math.floor(b.y / CELL);
+    const idx = cj * COLS + ci;
+    (grid[idx] || (grid[idx] = [])).push(b);
+  }
+
+  const falcon = mouseInSheet();
+  const t = frameCount;
+
+  for (const b of birds) {
+    let ax = 0, ay = 0;
+    let cx = 0, cy = 0, vxs = 0, vys = 0, sx = 0, sy = 0, n = 0;
+
+    const ci = Math.floor(b.x / CELL), cj = Math.floor(b.y / CELL);
+    for (let j = Math.max(0, cj - 1); j <= Math.min(ROWS - 1, cj + 1); j++) {
+      for (let i = Math.max(0, ci - 1); i <= Math.min(COLS - 1, ci + 1); i++) {
+        const cell = grid[j * COLS + i];
+        if (!cell) continue;
+        for (const o of cell) {
+          if (o === b) continue;
+          const dx = o.x - b.x, dy = o.y - b.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > PERCEPT * PERCEPT) continue;
+          n++;
+          cx += o.x; cy += o.y;
+          vxs += o.vx; vys += o.vy;
+          if (d2 < SEP * SEP && d2 > 0.0001) {
+            const inv = 1 / d2;
+            sx -= dx * inv; sy -= dy * inv;
+          }
+        }
+      }
+    }
+
+    if (n > 0) {
+      // cohesion
+      ax += ((cx / n - b.x) * 0.01) * 0.7;
+      ay += ((cy / n - b.y) * 0.01) * 0.7;
+      // alignment
+      ax += ((vxs / n - b.vx) * 0.05) * 0.9;
+      ay += ((vys / n - b.vy) * 0.05) * 0.9;
+      // separation
+      ax += sx * 1.7;
+      ay += sy * 1.7;
+    }
+
+    // slow weather: a drifting noise wind
+    const wa = (noise(b.x * 0.0018, b.y * 0.0018, t * 0.004) - 0.5) * TWO_PI * 3;
+    ax += Math.cos(wa) * 0.028;
+    ay += Math.sin(wa) * 0.028;
+
+    // the falcon
+    if (falcon) {
+      const dx = b.x - falcon.x, dy = b.y - falcon.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 150 * 150 && d2 > 1) {
+        const f = 220 / d2;
+        ax += dx * f;
+        ay += dy * f;
+      }
+    }
+
+    // a click startles the whole neighborhood
+    if (startle && t - startle.t < 14) {
+      const dx = b.x - startle.x, dy = b.y - startle.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 260 * 260 && d2 > 1) {
+        const f = 900 / d2;
+        ax += dx * f;
+        ay += dy * f;
+      }
+    }
+
+    // clamp flock forces first…
+    const am = Math.hypot(ax, ay);
+    if (am > MAXFORCE * 4) { ax *= (MAXFORCE * 4) / am; ay *= (MAXFORCE * 4) / am; }
+
+    // …then the walls, outside the clamp: flock pressure can never dilute them
+    const EDGE = 110, K = 0.34;
+    if (b.x < IX0 + EDGE) ax += K * ((1 - (b.x - IX0) / EDGE) ** 2);
+    if (b.x > IX1 - EDGE) ax -= K * ((1 - (IX1 - b.x) / EDGE) ** 2);
+    if (b.y < IY0 + EDGE) ay += K * ((1 - (b.y - IY0) / EDGE) ** 2);
+    if (b.y > IY1 - EDGE) ay -= K * ((1 - (IY1 - b.y) / EDGE) ** 2);
+    b.vx += ax; b.vy += ay;
+    const vm = Math.hypot(b.vx, b.vy);
+    if (vm > MAXSPEED) { b.vx *= MAXSPEED / vm; b.vy *= MAXSPEED / vm; }
+    if (vm < 1.2 && vm > 0.001) { b.vx *= 1.2 / vm; b.vy *= 1.2 / vm; }
+    b.x += b.vx; b.y += b.vy;
+
+    // hard clamp — never touch the margin
+    if (b.x < IX0 + 1) { b.x = IX0 + 1; b.vx = Math.abs(b.vx); }
+    if (b.x > IX1 - 1) { b.x = IX1 - 1; b.vx = -Math.abs(b.vx); }
+    if (b.y < IY0 + 1) { b.y = IY0 + 1; b.vy = Math.abs(b.vy); }
+    if (b.y > IY1 - 1) { b.y = IY1 - 1; b.vy = -Math.abs(b.vy); }
+  }
+
+  // draw: each bird is a short ink stroke along its flight, into the trail buffer
+  const tc = trail.drawingContext;
+  tc.save();
+  tc.beginPath();
+  tc.rect(IX0, IY0, IX1 - IX0, IY1 - IY0);
+  tc.clip();
+  for (const b of birds) {
+    if (b.tone === 2) {
+      trail.strokeWeight(1.2);
+      trail.stroke(ACCENT[0], ACCENT[1], ACCENT[2], 170);
+    } else if (b.tone === 1) {
+      trail.strokeWeight(1);
+      trail.stroke(INK[0], INK[1], INK[2], 110);
+    } else {
+      trail.strokeWeight(0.8);
+      trail.stroke(FAINT[0], FAINT[1], FAINT[2], 60);
+    }
+    trail.line(b.x, b.y, b.x - b.vx * 2, b.y - b.vy * 2);
+  }
+  tc.restore();
+
+  // composite: pristine paper, then the living ink
+  noStroke();
+  fill(...PAPER);
+  rect(IX0, IY0, IX1 - IX0, IY1 - IY0);
+  image(trail, 0, 0, W, H);
+}
+</script>
+</body>
+</html>
