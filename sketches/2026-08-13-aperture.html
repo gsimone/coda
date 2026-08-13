@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- coda: a dark mezzotint field of seeded stipple, interrupted by one copper-rimmed circular aperture. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>aperture</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: oklch(0.12 0.015 275);
+  }
+  canvas {
+    display: block;
+    width: min(92vw, calc(92vh * 0.70703)) !important;
+    height: auto !important;
+    box-shadow: 0 18px 60px oklch(0 0 0 / 0.55), 0 2px 8px oklch(0 0 0 / 0.4);
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+</head>
+<body>
+<script>
+// oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+function oklch(L, C, H) {
+  const h = (H * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((x) => {
+    const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  });
+}
+
+const SEED = 13;
+const W = 794, H = 1123;
+const M = Math.round(W * 0.07);
+const IX0 = M, IY0 = M, IX1 = W - M, IY1 = H - M;
+
+// quiet field + loud accent — dark paper, copper rim
+const PAPER  = oklch(0.17, 0.018, 278);
+const DOT_A  = oklch(0.42, 0.028, 275);
+const DOT_B  = oklch(0.52, 0.032, 282);
+const DOT_C  = oklch(0.60, 0.024, 270);
+const ACCENT = oklch(0.68, 0.155, 58);
+const SIGN   = oklch(0.42, 0.018, 275);
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(2);
+  randomSeed(SEED);
+  noiseSeed(SEED);
+  noLoop();
+  drawSheet();
+}
+
+function drawSheet() {
+  background(...PAPER);
+
+  const cx = lerp(IX0, IX1, 0.5);
+  const cy = lerp(IY0, IY1, 0.4);
+  const R = min(IX1 - IX0, IY1 - IY0) * 0.26;
+
+  noStroke();
+  const innerW = IX1 - IX0;
+  const innerH = IY1 - IY0;
+  const cols = 78;
+  const rows = Math.round((cols * innerH) / innerW);
+  const dx = innerW / cols;
+  const dy = innerH / rows;
+
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const x = IX0 + (i + 0.5) * dx;
+      const y = IY0 + (j + 0.5) * dy;
+      const jx = (random() - 0.5) * dx * 0.7;
+      const jy = (random() - 0.5) * dy * 0.7;
+      const px = x + jx;
+      const py = y + jy;
+      const d = dist(px, py, cx, cy);
+      if (d < R + 2) continue;
+
+      const n = noise(i * 0.055, j * 0.055);
+      if (n < 0.18) continue;
+      if (random() > n * 0.88) continue;
+
+      const pick = n;
+      const col = pick < 0.45 ? DOT_A : pick < 0.78 ? DOT_B : DOT_C;
+      fill(...col);
+      circle(px, py, lerp(1.4, 3.2, n));
+    }
+  }
+
+  // punch a clean void, then copper rim — the only loud ink
+  fill(...PAPER);
+  noStroke();
+  circle(cx, cy, R * 2);
+  noFill();
+  stroke(...ACCENT);
+  strokeWeight(1.4);
+  circle(cx, cy, R * 2);
+  strokeWeight(0.45);
+  drawingContext.setLineDash([1.4, 3.8]);
+  circle(cx, cy, R * 2 + 9);
+  drawingContext.setLineDash([]);
+
+  // signature in the lower margin
+  noStroke();
+  fill(...SIGN);
+  textFont("Georgia, serif");
+  textSize(11);
+  textAlign(CENTER, BOTTOM);
+  text("aperture · 2026-08-13 · grok", W / 2, H - M * 0.38);
+}
+</script>
+</body>
+</html>
