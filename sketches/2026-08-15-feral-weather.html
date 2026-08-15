@@ -1,0 +1,372 @@
+<!doctype html>
+<!-- A dark sheet grows a weather system of luminous threads that knot, fray, and rewrite their paths. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>feral weather · 2026-08-15 · gpt</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: oklch(0.09 0.012 270);
+        padding: 18px;
+      }
+
+      canvas {
+        display: block;
+        width: min(calc(100vw - 36px), calc((100vh - 36px) * 0.70703)) !important;
+        height: auto !important;
+        max-height: calc(100vh - 36px);
+        box-shadow:
+          0 3px 7px oklch(0.04 0.01 270 / 45%),
+          0 28px 78px oklch(0.04 0.01 270 / 62%);
+        cursor: crosshair;
+      }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+  </head>
+  <body>
+    <main aria-label="Feral weather, a generative storm of luminous threads. Click the sheet to seed a new storm."></main>
+    <script>
+      const SHEET = { width: 794, height: 1123 };
+      const FIELD = { left: 61, top: 66, right: 733, bottom: 1019 };
+      const PARTICLE_COUNT = 620;
+      const PRE_ROLL_STEPS = 520;
+      const STEP_TIME = 0.0038;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      const paletteDefinition = {
+        paper: [0.17, 0.02, 270],
+        veil: [0.205, 0.024, 270],
+        violet: [0.72, 0.12, 276],
+        orchid: [0.72, 0.12, 310],
+        rose: [0.72, 0.12, 344],
+        ember: [0.72, 0.12, 20],
+      };
+
+      let palette;
+      let trailLayer;
+      let particles = [];
+      let vortices = [];
+      let simulationTime = 0;
+      let edition = 150826;
+      let buildDurationMs = 0;
+
+      // oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const a = C * Math.cos(h), b = C * Math.sin(h);
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+        const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+        const lin = [
+          +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((x) => {
+          const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+          return Math.round(Math.min(1, Math.max(0, v)) * 255);
+        });
+      }
+
+      function convertPalette(source) {
+        return Object.fromEntries(
+          Object.entries(source).map(([name, [lightness, chroma, hue]]) => [
+            name,
+            oklch(lightness, chroma, hue),
+          ]),
+        );
+      }
+
+      function setup() {
+        const canvas = createCanvas(SHEET.width, SHEET.height);
+        canvas.parent(document.querySelector("main"));
+        pixelDensity(Math.min(window.devicePixelRatio || 1, 2));
+        frameRate(30);
+        palette = convertPalette(paletteDefinition);
+        trailLayer = createGraphics(SHEET.width, SHEET.height);
+        trailLayer.pixelDensity(1);
+        buildStorm(edition);
+        if (reducedMotion) noLoop();
+      }
+
+      function buildStorm(seed) {
+        const startedAt = performance.now();
+        randomSeed(seed);
+        noiseSeed(seed);
+        particles = [];
+        vortices = [];
+        simulationTime = -PRE_ROLL_STEPS * STEP_TIME;
+
+        trailLayer.clear();
+        trailLayer.background(...palette.paper);
+        trailLayer.strokeCap(ROUND);
+        trailLayer.blendMode(SCREEN);
+
+        for (let i = 0; i < 5; i += 1) {
+          vortices.push({
+            x: random(FIELD.left + 130, FIELD.right - 130),
+            y: random(FIELD.top + 150, FIELD.bottom - 150),
+            radius: random(120, 245),
+            strength: random(0.45, 1.12),
+            direction: random() < 0.5 ? -1 : 1,
+            phase: random(TAU),
+            drift: random(0.18, 0.48),
+          });
+        }
+
+        for (let i = 0; i < PARTICLE_COUNT; i += 1) {
+          particles.push(makeParticle(true));
+        }
+
+        preRollStorm();
+        buildDurationMs = performance.now() - startedAt;
+      }
+
+      function preRollStorm() {
+        const context = trailLayer.drawingContext;
+        context.save();
+        context.globalCompositeOperation = "screen";
+        context.lineCap = "round";
+        context.lineJoin = "round";
+
+        for (let i = 0; i < particles.length; i += 1) {
+          let particle = particles[i];
+          let segments = 0;
+          beginNativePath(context, particle);
+
+          for (let step = 0; step < PRE_ROLL_STEPS; step += 1) {
+            simulationTime = (step - PRE_ROLL_STEPS) * STEP_TIME;
+            const velocity = fieldVelocity(particle, false);
+            particle.previousX = particle.x;
+            particle.previousY = particle.y;
+            particle.x += velocity.x * particle.speed;
+            particle.y += velocity.y * particle.speed;
+            particle.age += 1;
+
+            const escaped =
+              particle.x < FIELD.left ||
+              particle.x > FIELD.right ||
+              particle.y < FIELD.top ||
+              particle.y > FIELD.bottom;
+
+            if (escaped || particle.age > particle.lifespan) {
+              if (segments > 1) strokeNativePath(context, particle);
+              particle = makeParticle(false);
+              beginNativePath(context, particle);
+              segments = 0;
+              continue;
+            }
+
+            context.lineTo(particle.x, particle.y);
+            segments += 1;
+          }
+
+          if (segments > 1) strokeNativePath(context, particle);
+          particles[i] = particle;
+        }
+
+        context.restore();
+        simulationTime = 0;
+        trailLayer.blendMode(SCREEN);
+      }
+
+      function beginNativePath(context, particle) {
+        context.beginPath();
+        context.moveTo(particle.x, particle.y);
+      }
+
+      function strokeNativePath(context, particle) {
+        const colors = [palette.violet, palette.orchid, palette.rose, palette.ember];
+        const color = colors[particle.colorIndex];
+        context.strokeStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${0.22 + particle.weight * 0.1})`;
+        context.lineWidth = 0.52 + particle.weight * 0.68;
+        context.stroke();
+      }
+
+      function makeParticle(firstRun) {
+        const edgeBias = random();
+        let x;
+        let y;
+
+        if (firstRun || edgeBias < 0.38) {
+          x = random(FIELD.left, FIELD.right);
+          y = random(FIELD.top, FIELD.bottom);
+        } else if (edgeBias < 0.69) {
+          x = random() < 0.5 ? FIELD.left : FIELD.right;
+          y = random(FIELD.top, FIELD.bottom);
+        } else {
+          x = random(FIELD.left, FIELD.right);
+          y = random() < 0.5 ? FIELD.top : FIELD.bottom;
+        }
+
+        const colorBand = constrain(
+          floor(map(y, FIELD.top, FIELD.bottom, 0, 4)),
+          0,
+          3,
+        );
+
+        return {
+          x,
+          y,
+          previousX: x,
+          previousY: y,
+          speed: random(0.62, 1.82),
+          weight: random(0.32, 1.06),
+          colorIndex: random() < 0.76 ? colorBand : floor(random(4)),
+          age: firstRun ? floor(random(0, 440)) : 0,
+          lifespan: floor(random(280, 760)),
+          crookedness: random(-0.28, 0.28),
+        };
+      }
+
+      function stepStorm(fadeAlpha = 0.34, interactive = true) {
+        if (fadeAlpha > 0) {
+          trailLayer.blendMode(BLEND);
+          trailLayer.noStroke();
+          trailLayer.fill(...palette.paper, fadeAlpha);
+          trailLayer.rect(
+            FIELD.left,
+            FIELD.top,
+            FIELD.right - FIELD.left,
+            FIELD.bottom - FIELD.top,
+          );
+          trailLayer.blendMode(SCREEN);
+        }
+
+        for (let i = 0; i < particles.length; i += 1) {
+          const particle = particles[i];
+          const velocity = fieldVelocity(particle, interactive);
+          particle.previousX = particle.x;
+          particle.previousY = particle.y;
+          particle.x += velocity.x * particle.speed;
+          particle.y += velocity.y * particle.speed;
+          particle.age += 1;
+
+          const escaped =
+            particle.x < FIELD.left ||
+            particle.x > FIELD.right ||
+            particle.y < FIELD.top ||
+            particle.y > FIELD.bottom;
+
+          if (escaped || particle.age > particle.lifespan) {
+            particles[i] = makeParticle(false);
+            continue;
+          }
+
+          drawTrail(particle, velocity);
+        }
+
+        simulationTime += STEP_TIME;
+      }
+
+      function fieldVelocity(particle, interactive) {
+        const scale = 0.00265;
+        const noiseAngle =
+          noise(particle.x * scale, particle.y * scale, simulationTime) * TAU * 4.2;
+        let x = Math.cos(noiseAngle) * 0.86;
+        let y = Math.sin(noiseAngle) * 0.86;
+
+        for (const vortex of vortices) {
+          const centerX = vortex.x + Math.cos(simulationTime * vortex.drift + vortex.phase) * 46;
+          const centerY = vortex.y + Math.sin(simulationTime * vortex.drift * 0.73 + vortex.phase) * 58;
+          const dx = particle.x - centerX;
+          const dy = particle.y - centerY;
+          const distance = Math.max(1, Math.hypot(dx, dy));
+          const influence = Math.exp(-distance / vortex.radius) * vortex.strength;
+          const tangent = Math.atan2(dy, dx) + HALF_PI * vortex.direction;
+          x += Math.cos(tangent) * influence;
+          y += Math.sin(tangent) * influence;
+        }
+
+        if (
+          interactive &&
+          mouseX >= FIELD.left &&
+          mouseX <= FIELD.right &&
+          mouseY >= FIELD.top &&
+          mouseY <= FIELD.bottom
+        ) {
+          const dx = particle.x - mouseX;
+          const dy = particle.y - mouseY;
+          const distance = Math.max(1, Math.hypot(dx, dy));
+          const influence = Math.exp(-distance / 115) * 1.45;
+          const tangent = Math.atan2(dy, dx) + HALF_PI;
+          x += Math.cos(tangent) * influence;
+          y += Math.sin(tangent) * influence;
+        }
+
+        const angle = Math.atan2(y, x) + particle.crookedness;
+        return { x: Math.cos(angle), y: Math.sin(angle) };
+      }
+
+      function drawTrail(particle, velocity) {
+        const colors = [palette.violet, palette.orchid, palette.rose, palette.ember];
+        const color = colors[particle.colorIndex];
+        const pulse = 0.68 + Math.sin(particle.age * 0.037 + particle.colorIndex) * 0.32;
+        trailLayer.stroke(color[0], color[1], color[2], 31 + pulse * 45);
+        trailLayer.strokeWeight(particle.weight * (0.76 + pulse * 0.48));
+        trailLayer.line(
+          particle.previousX,
+          particle.previousY,
+          particle.x,
+          particle.y,
+        );
+
+        if (random() < 0.008) {
+          const fray = random(2, 8);
+          trailLayer.stroke(color[0], color[1], color[2], 28);
+          trailLayer.strokeWeight(0.42);
+          trailLayer.line(
+            particle.x,
+            particle.y,
+            particle.x - velocity.y * fray,
+            particle.y + velocity.x * fray,
+          );
+        }
+      }
+
+      function draw() {
+        for (let i = 0; i < 2; i += 1) stepStorm(0.34, true);
+        background(...palette.paper);
+        image(trailLayer, 0, 0);
+        drawSignature();
+      }
+
+      function drawSignature() {
+        const ink = palette.violet;
+        noStroke();
+        fill(ink[0], ink[1], ink[2], 155);
+        textFont("ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+        textSize(10.8);
+        textStyle(NORMAL);
+        textAlign(LEFT, BASELINE);
+        text("feral weather · 2026-08-15 · gpt", FIELD.left, 1073);
+      }
+
+      function mousePressed() {
+        if (mouseX < 0 || mouseX > width || mouseY < 0 || mouseY > height) return;
+        edition = (edition * 1664525 + 1013904223) >>> 0;
+        buildStorm(edition);
+        redraw();
+      }
+    </script>
+  </body>
+</html>
