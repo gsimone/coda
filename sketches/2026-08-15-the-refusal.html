@@ -1,0 +1,251 @@
+<!doctype html>
+<!-- A dense field of ink lines bends around one quiet circular absence while a single vermilion path refuses the detour. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>the refusal · 2026-08-15 · gpt</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: oklch(0.19 0.018 255);
+        padding: 18px;
+      }
+
+      canvas {
+        display: block;
+        width: min(calc(100vw - 36px), calc((100vh - 36px) * 0.70703)) !important;
+        height: auto !important;
+        max-height: calc(100vh - 36px);
+        box-shadow:
+          0 2px 4px rgb(8 13 20 / 18%),
+          0 22px 70px rgb(8 13 20 / 42%);
+        cursor: crosshair;
+      }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+  </head>
+  <body>
+    <main aria-label="The refusal, a generative line drawing. Click the sheet to create another seeded edition."></main>
+    <script>
+      const SHEET = { width: 794, height: 1123 };
+      const FRAME = { left: 62, top: 70, right: 732, bottom: 1017 };
+      const SIGNATURE_Y = 1072;
+      let edition = 81526;
+
+      const paletteDefinition = {
+        paper: [0.972, 0.009, 88],
+        paperGrain: [0.78, 0.018, 88],
+        ink: [0.255, 0.028, 255],
+        quietInk: [0.48, 0.032, 255],
+        accent: [0.64, 0.185, 28],
+      };
+
+      let palette;
+
+      // oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const a = C * Math.cos(h), b = C * Math.sin(h);
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+        const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+        const lin = [
+          +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((x) => {
+          const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+          return Math.round(Math.min(1, Math.max(0, v)) * 255);
+        });
+      }
+
+      function convertPalette(source) {
+        return Object.fromEntries(
+          Object.entries(source).map(([name, [lightness, chroma, hue]]) => [
+            name,
+            oklch(lightness, chroma, hue),
+          ]),
+        );
+      }
+
+      function setup() {
+        const canvas = createCanvas(SHEET.width, SHEET.height);
+        canvas.parent(document.querySelector("main"));
+        pixelDensity(Math.min(window.devicePixelRatio || 1, 2));
+        palette = convertPalette(paletteDefinition);
+        noLoop();
+      }
+
+      function draw() {
+        randomSeed(edition);
+        noiseSeed(edition);
+        background(...palette.paper);
+        drawPaper();
+
+        const absence = {
+          x: SHEET.width * 0.5 + random(-34, 34),
+          y: SHEET.height * 0.46 + random(-58, 58),
+          radius: random(122, 148),
+        };
+
+        drawField(absence);
+        drawRefusal(absence);
+        drawSignature();
+      }
+
+      function drawPaper() {
+        push();
+        noStroke();
+        const grain = palette.paperGrain;
+        for (let i = 0; i < 7200; i += 1) {
+          const x = random(SHEET.width);
+          const y = random(SHEET.height);
+          const alpha = random(2, 9);
+          fill(grain[0], grain[1], grain[2], alpha);
+          circle(x, y, random(0.35, 1.1));
+        }
+        pop();
+      }
+
+      function drawField(absence) {
+        const lineSpacing = 10.8;
+        const ink = palette.ink;
+        const quiet = palette.quietInk;
+
+        noFill();
+        strokeCap(ROUND);
+        strokeJoin(ROUND);
+
+        let index = 0;
+        for (let baseY = FRAME.top + 18; baseY <= FRAME.bottom - 18; baseY += lineSpacing) {
+          const distance = Math.abs(baseY - absence.y);
+          const nearness = Math.max(0, 1 - distance / (absence.radius * 2.25));
+          const useQuietInk = index % 5 === 0;
+          const color = useQuietInk ? quiet : ink;
+          const alpha = useQuietInk ? 86 : 120 + nearness * 34;
+          stroke(color[0], color[1], color[2], alpha);
+          strokeWeight(useQuietInk ? 0.82 : 0.76 + nearness * 0.28);
+
+          beginShape();
+          for (let x = FRAME.left; x <= FRAME.right; x += 3.1) {
+            const normalizedX = (x - absence.x) / (absence.radius * 1.34);
+            const envelope = Math.exp(-normalizedX * normalizedX * 1.22);
+            const signedDistance = baseY - absence.y;
+            const direction = signedDistance === 0 ? (index % 2 ? -1 : 1) : Math.sign(signedDistance);
+            const pressure = Math.max(0, absence.radius * 1.08 - Math.abs(signedDistance));
+            const deflection = direction * pressure * envelope;
+
+            const broadDrift = map(
+              noise(x * 0.0032, baseY * 0.0063),
+              0,
+              1,
+              -8.5,
+              8.5,
+            );
+            const fineDrift = map(
+              noise(x * 0.014 + 40, baseY * 0.021 + 70),
+              0,
+              1,
+              -1.6,
+              1.6,
+            );
+            const edgeEase = Math.sin(map(x, FRAME.left, FRAME.right, 0, Math.PI));
+            const y = baseY + deflection + (broadDrift + fineDrift) * edgeEase;
+            curveVertex(x, y);
+          }
+          endShape();
+          index += 1;
+        }
+
+        drawBrokenEchoes(absence);
+      }
+
+      function drawBrokenEchoes(absence) {
+        const ink = palette.quietInk;
+        stroke(ink[0], ink[1], ink[2], 78);
+        strokeWeight(0.76);
+        noFill();
+
+        for (let ring = 0; ring < 4; ring += 1) {
+          const radius = absence.radius + 23 + ring * 19;
+          const start = random(-0.2, 0.35);
+          const span = random(0.35, 0.82);
+          arc(
+            absence.x,
+            absence.y,
+            radius * 2,
+            radius * 2,
+            start,
+            start + span,
+          );
+          arc(
+            absence.x,
+            absence.y,
+            radius * 2,
+            radius * 2,
+            start + PI,
+            start + PI + span * 0.72,
+          );
+        }
+      }
+
+      function drawRefusal(absence) {
+        const accent = palette.accent;
+        noFill();
+        stroke(accent[0], accent[1], accent[2], 238);
+        strokeWeight(2.3);
+        strokeCap(ROUND);
+
+        beginShape();
+        for (let x = FRAME.left + 3; x <= FRAME.right - 3; x += 2.4) {
+          const phase = map(x, FRAME.left, FRAME.right, -PI, PI);
+          const restraint = Math.sin(map(x, FRAME.left, FRAME.right, 0, Math.PI));
+          const grain = map(noise(x * 0.01, 913), 0, 1, -2.4, 2.4);
+          const y = absence.y + Math.sin(phase * 0.72) * 7.5 + grain * restraint;
+          curveVertex(x, y);
+        }
+        endShape();
+
+        noStroke();
+        fill(accent[0], accent[1], accent[2], 238);
+        circle(absence.x, absence.y, 5.4);
+      }
+
+      function drawSignature() {
+        const ink = palette.ink;
+        noStroke();
+        fill(ink[0], ink[1], ink[2], 180);
+        textFont("ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+        textSize(11.2);
+        textStyle(NORMAL);
+        textAlign(LEFT, BASELINE);
+        text("the refusal · 2026-08-15 · gpt", FRAME.left, SIGNATURE_Y);
+      }
+
+      function mousePressed() {
+        if (mouseX < 0 || mouseX > width || mouseY < 0 || mouseY > height) return;
+        edition = (edition * 1664525 + 1013904223) >>> 0;
+        redraw();
+      }
+    </script>
+  </body>
+</html>
