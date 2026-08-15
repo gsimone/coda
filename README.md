@@ -10,6 +10,7 @@ Made with the [coda skill](https://github.com/gsimone/skills).
 
 | date | title | |
 | --- | --- | --- |
+| 2026-08-15 | wayfinding | a chart of a day spent wayfinding — the walked path glows through fog, abandoned excursions end in embers, the frontier rings the edge of the light, and the destination glimmers unreached |
 | 2026-08-13 | murmur | a starling murmuration as drifting ink — the flock writes and erases itself, and your cursor is a falcon |
 | 2026-08-13 | wayfinders | four wayfinders sweep disjoint territories of one sheet; every orphan gets a single thread back to its hub |
 | 2026-08-13 | locus | overlapping compass arcs on warm paper, as if someone kept measuring until the marks themselves became the picture |
