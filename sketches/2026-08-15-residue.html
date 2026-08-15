@@ -1,0 +1,173 @@
+<!doctype html>
+<!-- A smooth meander falls down the page beside its sample-and-hold shadow, and the error between them is shaded: the residue made visible. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>residue</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        background: rgb(224, 221, 214);
+      }
+      #sheet {
+        height: min(1123px, calc(100vh - 56px));
+        aspect-ratio: 794 / 1123;
+        box-shadow: 0 12px 40px rgba(40, 36, 28, 0.28);
+      }
+      #sheet canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sheet"></div>
+    <script>
+      // oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const a = C * Math.cos(h), b = C * Math.sin(h);
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+        const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+        const lin = [
+          +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((x) => {
+          const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+          return Math.round(Math.min(1, Math.max(0, v)) * 255);
+        });
+      }
+
+      function mulberry32(seed) {
+        let a = seed >>> 0;
+        return () => {
+          a = (a + 0x6d2b79f5) | 0;
+          let t = Math.imul(a ^ (a >>> 15), 1 | a);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      const W = 794, H = 1123;
+      const seed = Number(new URLSearchParams(location.search).get('seed') ?? 20260815);
+      const rand = mulberry32(seed);
+      const between = (lo, hi) => lo + rand() * (hi - lo);
+
+      const PAPER = oklch(0.965, 0.012, 85);
+      const INK = oklch(0.32, 0.02, 60);
+      const STAIR = oklch(0.6, 0.16, 45);
+      const RESIDUE = oklch(0.7, 0.1, 225);
+      const LATTICE = oklch(0.9, 0.012, 85);
+
+      const M = 80; // margin, > 7% of width
+      const frameTop = M, frameBottom = H - M - 26, frameLeft = M, frameRight = W - M;
+      const workW = frameRight - frameLeft;
+      const cx = frameLeft + workW / 2;
+
+      // the meander: three seeded sines, total amplitude kept inside the frame
+      const waves = [];
+      {
+        let budget = workW / 2 - 14;
+        const big = between(0.55, 0.7) * budget;
+        waves.push({ amp: big, cycles: between(2.2, 3.4), phase: between(0, Math.PI * 2) });
+        budget -= big;
+        const mid = between(0.5, 0.75) * budget;
+        waves.push({ amp: mid, cycles: between(5.5, 8.5), phase: between(0, Math.PI * 2) });
+        budget -= mid;
+        waves.push({ amp: budget, cycles: between(13, 21), phase: between(0, Math.PI * 2) });
+      }
+      const smoothX = (y) => {
+        const t = (y - frameTop) / (frameBottom - frameTop);
+        let x = cx;
+        for (const w of waves) x += w.amp * Math.sin(t * w.cycles * Math.PI * 2 + w.phase);
+        return x;
+      };
+
+      // the lattice: snap to columns, then clamp — bounds win over the lattice
+      const cols = Math.round(between(20, 28));
+      const step = workW / cols;
+      const quantize = (x) => Math.min(frameRight, Math.max(frameLeft, frameLeft + Math.round((x - frameLeft) / step) * step));
+
+      // sample-and-hold bands; a few refuse to update and hold their last good value
+      const bandH = between(11, 15);
+      const bands = [];
+      {
+        let y = frameTop, held = quantize(smoothX(frameTop)), holdFor = 0;
+        while (y < frameBottom) {
+          if (holdFor > 0) holdFor -= 1;
+          else if (rand() < 0.07) holdFor = Math.round(between(2, 5));
+          else held = quantize(smoothX(y));
+          bands.push({ y0: y, y1: Math.min(y + bandH, frameBottom), x: held });
+          y += bandH;
+        }
+      }
+
+      window.setup = () => {
+        const canvas = createCanvas(W, H);
+        canvas.parent(document.getElementById('sheet'));
+        pixelDensity(2);
+        noLoop();
+      };
+
+      window.draw = () => {
+        background(...PAPER);
+
+        // lattice hairlines, inside the frame only
+        stroke(...LATTICE);
+        strokeWeight(1);
+        for (let c = 0; c <= cols; c++) line(frameLeft + c * step, frameTop, frameLeft + c * step, frameBottom);
+
+        // residue: the error between the meander and its held shadow,
+        // one closed shape per band so the pools fill without banding
+        noStroke();
+        fill(...RESIDUE, 96);
+        for (const band of bands) {
+          beginShape();
+          for (let y = band.y0; y <= band.y1; y += 1) vertex(smoothX(y), y);
+          vertex(band.x, band.y1);
+          vertex(band.x, band.y0);
+          endShape(CLOSE);
+        }
+
+        // the held shadow: a sample-and-hold staircase
+        stroke(...STAIR);
+        strokeWeight(2.2);
+        strokeCap(PROJECT);
+        for (let i = 0; i < bands.length; i++) {
+          const band = bands[i];
+          line(band.x, band.y0, band.x, band.y1);
+          if (i + 1 < bands.length) line(band.x, band.y1, bands[i + 1].x, band.y1);
+        }
+
+        // the meander itself, drawn last, thin and continuous
+        noFill();
+        stroke(...INK);
+        strokeWeight(1.3);
+        beginShape();
+        for (let y = frameTop; y <= frameBottom; y += 1) vertex(smoothX(y), y);
+        endShape();
+
+        // signature
+        noStroke();
+        fill(...INK, 200);
+        textFont('Courier New');
+        textSize(11);
+        textAlign(CENTER, BOTTOM);
+        text('residue · 2026-08-15 · claude fable 5', W / 2, H - 34);
+      };
+    </script>
+  </body>
+</html>
