@@ -1,0 +1,135 @@
+<!doctype html>
+<!-- Accumulation as the whole subject: ~180k strokes, each too faint to see alone — the image is only what settles. One band where deposition is withheld. No accent, no metaphor. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>settle</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: rgb(226, 224, 219); }
+  body { display: grid; place-items: center; }
+  main { line-height: 0; }
+  canvas { box-shadow: 0 12px 48px rgba(30, 30, 40, 0.28); }
+</style>
+</head>
+<body>
+<script>
+// oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+function oklch(L, C, H) {
+  const h = (H * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((x) => {
+    const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  });
+}
+
+const W = 794, H = 1123;
+const MARGIN = 68;
+const SEED = 815;
+
+const PAPER = oklch(0.964, 0.009, 88);   // warm near-white
+const INK   = oklch(0.32, 0.014, 268);   // cool graphite
+const SIG   = oklch(0.55, 0.015, 270);
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(2);
+  randomSeed(SEED); noiseSeed(SEED);
+  noLoop();
+}
+
+function draw() {
+  background(PAPER[0], PAPER[1], PAPER[2]);
+
+  const bandY = H * 0.655;            // the withheld band
+  const bandHalf = 34;
+
+  const inner = { x0: MARGIN + 10, x1: W - MARGIN - 10, y0: MARGIN + 14, y1: H - MARGIN - 46 };
+
+  strokeCap(ROUND);
+  const layers = 5;
+  for (let L = 0; L < layers; L++) {
+    const z = L * 3.7;
+    const flowScale = 0.0021 + L * 0.0006;   // each layer drifts at its own wavelength
+    const n = 62000;
+    for (let i = 0; i < n; i++) {
+      const x = random(inner.x0, inner.x1);
+      const y = random(inner.y0, inner.y1);
+
+      // large-scale weather: two octaves, high contrast — bare paper to real mass
+      const macro = noise(x * 0.00115 + 90 + L * 7, y * 0.00115 + 90, z);
+      const meso  = noise(x * 0.0038 + 300, y * 0.0038 + 300, z * 0.7);
+      const m = constrain(map(macro, 0.34, 0.70, 0, 1), 0, 1); // remap real Perlin range
+      const mass = pow(m, 1.7) * (0.5 + meso * 0.8);
+      // vertical stratification: heavier above the band, a fainter echo below
+      const t = y / H;
+      let strat = t < 0.62 ? map(t, 0.06, 0.62, 0.4, 1.25) : map(t, 0.66, 0.95, 0.7, 0.12);
+      strat = constrain(strat, 0.08, 1.25);
+      // the withheld band: deposition suppressed, edge softened by noise
+      const edgeJitter = (noise(x * 0.012, 400 + L * 5) - 0.5) * 26;
+      const db = abs(y - (bandY + edgeJitter));
+      const withheld = constrain(map(db, bandHalf * 0.45, bandHalf * 1.7, 0, 1), 0, 1);
+      // feathered organic boundary instead of a hard deposit rectangle
+      const ex = min(x - inner.x0, inner.x1 - x), ey = min(y - inner.y0, inner.y1 - y);
+      const ej = (noise(x * 0.01, y * 0.01, 77) - 0.5) * 70;
+      const feather = constrain(map(min(ex, ey) + ej, 0, 90, 0, 1), 0, 1);
+
+      const p = mass * strat * withheld * feather;
+      if (random() > p) continue;
+
+      // stroke follows the layer's drift field
+      const a = noise(x * flowScale, y * flowScale, z + 200) * TWO_PI * 2.6;
+      const len = random(2.5, 8);
+      const dx = cos(a) * len, dy = sin(a) * len;
+      const alpha = 5 + pow(mass, 1.4) * 24;
+      stroke(INK[0], INK[1], INK[2], alpha);
+      strokeWeight(random() < 0.06 ? 1.1 : 0.75);
+      line(x - dx / 2, y - dy / 2, x + dx / 2, y + dy / 2);
+    }
+  }
+
+  // reinforcement: the cores, where sediment actually gathers
+  for (let i = 0; i < 130000; i++) {
+    const x = random(inner.x0, inner.x1);
+    const y = random(inner.y0, inner.y1);
+    const macro = noise(x * 0.00115 + 90, y * 0.00115 + 90, 1.2);
+    const m = constrain(map(macro, 0.34, 0.70, 0, 1), 0, 1);
+    if (m < 0.5) continue;
+    const t = y / H;
+    let strat = t < 0.62 ? map(t, 0.06, 0.62, 0.4, 1.25) : map(t, 0.66, 0.95, 0.7, 0.12);
+    strat = constrain(strat, 0.08, 1.25);
+    const edgeJitter = (noise(x * 0.012, 400) - 0.5) * 26;
+    const withheld = constrain(map(abs(y - (bandY + edgeJitter)), bandHalf * 0.45, bandHalf * 1.7, 0, 1), 0, 1);
+    const p = pow((m - 0.5) / 0.5, 1.25) * strat * withheld;
+    if (random() > p) continue;
+    const a = noise(x * 0.0027, y * 0.0027, 201) * TWO_PI * 2.6;
+    // a small cluster per accepted sample: sediment gathers, not sprinkles
+    const k = 2 + Math.floor(m * 3);
+    for (let j = 0; j < k; j++) {
+      const jx = x + random(-6, 6), jy = y + random(-6, 6);
+      const ja = a + random(-0.35, 0.35);
+      const len = random(3, 10);
+      stroke(INK[0], INK[1], INK[2], 12 + m * 26);
+      strokeWeight(random() < 0.08 ? 1.15 : 0.85);
+      line(jx - cos(ja) * len / 2, jy - sin(ja) * len / 2, jx + cos(ja) * len / 2, jy + sin(ja) * len / 2);
+    }
+  }
+
+  // signature
+  noStroke(); fill(SIG[0], SIG[1], SIG[2], 220);
+  textFont("Georgia"); textSize(10.5); textAlign(CENTER, BOTTOM);
+  text("settle · 2026-08-15 · claude fable 5", W / 2, H - 26);
+}
+</script>
+</body>
+</html>
