@@ -1,0 +1,157 @@
+<!doctype html>
+<!-- One small form copied down the sheet, each copy inheriting a neighbor's drift, and a single late copy quietly restored to the original. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>divergent copies</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: rgb(226, 224, 219); /* oklch(0.91, 0.006, 85) */
+  }
+  main { line-height: 0; }
+  canvas {
+    box-shadow: 0 6px 30px rgba(30, 28, 24, 0.22);
+    max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);
+    width: auto !important; height: auto !important;
+  }
+</style>
+</head>
+<body>
+<script>
+// oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+function oklch(L, C, H) {
+  const h = (H * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((x) => {
+    const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  });
+}
+
+// Palette — quiet field + loud accent, built in OKLCH.
+const PAPER  = oklch(0.97, 0.010, 85);
+const INK    = oklch(0.30, 0.020, 270);
+const FAINT  = oklch(0.62, 0.020, 270);
+const ACCENT = oklch(0.60, 0.170, 25);
+
+const W = 794, H = 1123;           // A4 portrait, √2
+const COLS = 6, ROWS = 9;          // 54 copies
+const MX = 70, MTOP = 84, GRIDH = 934;
+const CW = (W - 2 * MX) / COLS, CH = GRIDH / ROWS;
+
+const seedParam = new URLSearchParams(location.search).get("seed");
+const SEED = seedParam !== null ? Number(seedParam) : Math.floor(Math.random() * 1e9);
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(2);
+  randomSeed(SEED);
+  noLoop();
+}
+
+// The canonical form: a small triangulated patch — perimeter ring + interior hub spokes.
+function makeCanonical() {
+  const n = 9;
+  const verts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TWO_PI + random(-0.14, 0.14);
+    const r = 30 * random(0.82, 1.08);
+    verts.push([Math.cos(a) * r, Math.sin(a) * r]);
+  }
+  const hub = [random(-5, 5), random(-5, 5)];
+  verts.push(hub); // index n
+  const edges = [];
+  for (let i = 0; i < n; i++) edges.push([i, (i + 1) % n]);         // ring
+  for (let i = 0; i < n; i += 2) edges.push([n, i]);                 // spokes
+  return { verts, edges: edges.map(e => ({ ij: e, doubled: false })), inkL: 0.30 };
+}
+
+// One generation of copy-drift: inherit, jitter, lose an edge, double an edge, fade.
+function mutate(parent, gen) {
+  const sigma = 0.9 + gen * 0.03;
+  const verts = parent.verts.map(([x, y]) =>
+    [x + randomGaussian(0, sigma) * 0.5, y + randomGaussian(0, sigma) * 0.5]);
+  const edges = [];
+  for (const e of parent.edges) {
+    if (random() < 0.018) continue;                    // a line the copy forgot
+    edges.push({ ij: e.ij.slice(), doubled: random() < 0.05 });
+  }
+  const inkL = constrain(parent.inkL + random(-0.012, 0.024), 0.24, 0.66);
+  return { verts, edges, inkL };
+}
+
+function drawForm(form, cx, cy, col, weight, alpha) {
+  push();
+  translate(cx, cy);
+  stroke(col[0], col[1], col[2], alpha);
+  strokeWeight(weight);
+  strokeCap(ROUND);
+  noFill();
+  for (const e of form.edges) {
+    const [i, j] = e.ij;
+    const [x1, y1] = form.verts[i], [x2, y2] = form.verts[j];
+    line(x1, y1, x2, y2);
+    if (e.doubled) {
+      const ox = randomGaussian(0, 0.4) + 1.6, oy = randomGaussian(0, 0.4) + 1.2;
+      line(x1 + ox, y1 + oy, x2 + ox, y2 + oy); // the paste that ran twice
+    }
+  }
+  pop();
+}
+
+function draw() {
+  background(...PAPER);
+
+  const canonical = makeCanonical();
+  const copies = [canonical];
+  for (let i = 1; i < COLS * ROWS; i++) {
+    // Copies inherit from the copy just before them, or the one directly above —
+    // whichever near neighbor the author happened to open.
+    const fromAbove = i >= COLS && random() < 0.3;
+    const parent = copies[fromAbove ? i - COLS : i - 1];
+    copies.push(mutate(parent, Math.floor(i / COLS) + 1));
+  }
+
+  // One late copy is quietly restored to the original.
+  const healed = COLS * (ROWS - 2) + Math.floor(random(1, COLS - 1));
+
+  for (let i = 0; i < copies.length; i++) {
+    const cx = MX + (i % COLS) * CW + CW / 2;
+    const cy = MTOP + Math.floor(i / COLS) * CH + CH / 2;
+    if (i === healed) {
+      const fresh = {
+        verts: canonical.verts.map(([x, y]) => [x + randomGaussian(0, 0.35), y + randomGaussian(0, 0.35)]),
+        edges: canonical.edges.map(e => ({ ij: e.ij.slice(), doubled: false })),
+      };
+      drawForm(fresh, cx, cy, ACCENT, 1.5, 255);
+    } else {
+      const col = oklch(copies[i].inkL, 0.02, 270);
+      const alpha = map(copies[i].inkL, 0.24, 0.66, 255, 170);
+      drawForm(copies[i], cx, cy, col, 1.2, alpha);
+    }
+  }
+
+  // Signature
+  noStroke();
+  fill(...FAINT);
+  textAlign(CENTER, BASELINE);
+  textFont("Georgia");
+  textSize(11);
+  text("divergent copies · 2026-08-16 · claude fable 5", W / 2, H - 44);
+}
+</script>
+</body>
+</html>
