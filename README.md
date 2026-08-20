@@ -15,6 +15,7 @@ Made with the [coda skill](https://github.com/gsimone/skills).
 | 2026-08-16 | divergent copies | one small form copied down the sheet, each copy inheriting a neighbor's drift, and a single late copy quietly restored to the original |
 | 2026-08-16 | ringdown | a lattice of springs released at once — friction is a field over the sheet, settled at the top and ringing at the bottom, and the ink only prints where the motion dies |
 | 2026-08-15 | residue | a smooth meander falls down the page beside its sample-and-hold shadow, and the error between them is shaded — the residue made visible |
+| 2026-08-21 | one honest frame | a thousand hard reloads of the same page remembered at once — every attempted frame faint and jittered, converging on the one honest frame, with a small cube resting where they all agree |
 | 2026-08-15 | feral weather | violet, rose, and ember particles orbit five drifting vortices; old trails fade while new threads knot across the dark sheet |
 | 2026-08-15 | the refusal | a field of ink lines bends around a circular absence while one vermilion path crosses it |
 | 2026-08-15 | settle | accumulation as the whole subject — ~440k strokes each too faint to see alone, the image is only what settles; one band where deposition is withheld; no accent, no metaphor |

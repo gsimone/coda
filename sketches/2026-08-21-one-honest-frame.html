@@ -1,0 +1,170 @@
+<!doctype html>
+<!-- A thousand hard reloads of the same page remembered at once: every attempted frame faint and
+     jittered, converging on the one honest frame, with a small cube resting where they all agree. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>one honest frame</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: rgb(24, 24, 28);
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+      main {
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="sheet"></main>
+    <script>
+      // oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const a = C * Math.cos(h),
+          b = C * Math.sin(h);
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+        const l = l_ ** 3,
+          m = m_ ** 3,
+          s = s_ ** 3;
+        const lin = [
+          +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((x) => {
+          const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+          return Math.round(Math.min(1, Math.max(0, v)) * 255);
+        });
+      }
+
+      const W = 794,
+        H = 1123;
+
+      // palette: quiet field + loud accent, blue-leaning
+      const PAPER = oklch(0.17, 0.022, 265);
+      const GHOST_DIM = oklch(0.45, 0.03, 262); // early, wild attempts
+      const GHOST_BRIGHT = oklch(0.74, 0.11, 262); // late attempts, warming into the accent
+      const ACCENT = oklch(0.58, 0.19, 264); // the honest frame + the cube
+      const INK = oklch(0.72, 0.02, 260); // signature
+
+      let seed;
+
+      function setup() {
+        const c = createCanvas(W, H);
+        c.parent(document.getElementById("sheet"));
+        pixelDensity(2);
+        seed = Math.floor(Math.random() * 1e9);
+        randomSeed(seed);
+        noiseSeed(seed);
+        noLoop();
+        fitSheet();
+        window.addEventListener("resize", fitSheet);
+      }
+
+      function fitSheet() {
+        const k = Math.min(window.innerWidth / W, window.innerHeight / H) * 0.94;
+        const el = document.querySelector("canvas");
+        el.style.width = `${W * k}px`;
+        el.style.height = `${H * k}px`;
+      }
+
+      // the one honest frame, inside the margins: sidebar column + main card
+      const M = Math.round(W * 0.11);
+      const FRAME = { x: M, y: Math.round(H * 0.16), w: W - 2 * M, h: Math.round(H * 0.62) };
+      const SIDEBAR_W = Math.round(FRAME.w * 0.26);
+      const GAP = 10;
+
+      function attempt(t, jitter) {
+        // one remembered reload: the frame as it landed, off by `jitter`
+        const j = (amp) => randomGaussian(0, amp * jitter);
+        const x = FRAME.x + j(78),
+          y = FRAME.y + j(95);
+        const w = FRAME.w * (1 + j(0.16)),
+          h = FRAME.h * (1 + j(0.18));
+        const sw = SIDEBAR_W * (1 + j(0.45));
+        const alpha = lerp(5, 26, t * t);
+        const col = [
+          lerp(GHOST_DIM[0], GHOST_BRIGHT[0], t),
+          lerp(GHOST_DIM[1], GHOST_BRIGHT[1], t),
+          lerp(GHOST_DIM[2], GHOST_BRIGHT[2], t),
+        ];
+        stroke(...col, alpha);
+        strokeWeight(lerp(1.4, 0.7, t));
+        noFill();
+        rect(x, y, sw, h, 7); // sidebar column
+        rect(x + sw + GAP, y, w - sw - GAP, h, 9); // main card
+        // header rule of the main card — the one line every load promised
+        const hy = y + lerp(28, 44, 0.5) * (1 + j(0.2));
+        line(x + sw + GAP + 12, hy, x + w - 12, hy);
+      }
+
+      function cube(cx, cy, s) {
+        // small isometric cube, resting still
+        const dx = s * 0.87,
+          dy = s * 0.5;
+        noStroke();
+        fill(...ACCENT, 255);
+        quad(cx, cy - s, cx + dx, cy - dy, cx, cy, cx - dx, cy - dy); // top
+        fill(...oklch(0.46, 0.17, 266), 255);
+        quad(cx - dx, cy - dy, cx, cy, cx, cy + s, cx - dx, cy + dy); // left
+        fill(...oklch(0.36, 0.14, 268), 255);
+        quad(cx + dx, cy - dy, cx, cy, cx, cy + s, cx + dx, cy + dy); // right
+      }
+
+      function draw() {
+        background(...PAPER);
+
+        // the memory of every reload: wild early, settling late
+        // nothing may cross into the margin, at any seed
+        drawingContext.save();
+        drawingContext.beginPath();
+        const MM = Math.round(W * 0.075);
+        drawingContext.rect(MM, MM, W - 2 * MM, H - 2 * MM);
+        drawingContext.clip();
+
+        const N = 750;
+        for (let i = 0; i < N; i++) {
+          const t = i / (N - 1);
+          const jitter = Math.pow(1 - t, 1.45);
+          attempt(t, jitter);
+        }
+
+        // the frame they were all trying to be
+        noFill();
+        stroke(...ACCENT, 150);
+        strokeWeight(1.2);
+        rect(FRAME.x, FRAME.y, SIDEBAR_W, FRAME.h, 7);
+        rect(FRAME.x + SIDEBAR_W + GAP, FRAME.y, FRAME.w - SIDEBAR_W - GAP, FRAME.h, 9);
+        stroke(...ACCENT, 90);
+        line(FRAME.x + SIDEBAR_W + GAP + 12, FRAME.y + 44, FRAME.x + FRAME.w - 12, FRAME.y + 44);
+        drawingContext.restore();
+
+        // the cube, arrived and still, centred in the main card
+        const cx = FRAME.x + SIDEBAR_W + GAP + (FRAME.w - SIDEBAR_W - GAP) / 2;
+        const cy = FRAME.y + FRAME.h / 2;
+        cube(cx, cy, 11);
+
+        // signature
+        noStroke();
+        fill(...INK, 140);
+        textFont("Georgia");
+        textSize(11);
+        textAlign(CENTER, BASELINE);
+        text(`one honest frame · 2026-08-21 · claude`, W / 2, H - Math.round(H * 0.045));
+      }
+    </script>
+  </body>
+</html>
