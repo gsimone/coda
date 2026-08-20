@@ -10,6 +10,7 @@ Made with the [coda skill](https://github.com/gsimone/skills).
 
 | date | title | |
 | --- | --- | --- |
+| 2026-08-20 | escape route | a page of justified, unreadable text and the one river of spaces that runs all the way through it — the escape route made visible, the caret standing free below the last line |
 | 2026-08-17 | frontier | a coral forest of small irreversible attachments — diffusion-limited aggregation climbing from a baseline, each stuck particle a locked decision, the frontier tips gilded |
 | 2026-08-16 | divergent copies | one small form copied down the sheet, each copy inheriting a neighbor's drift, and a single late copy quietly restored to the original |
 | 2026-08-16 | ringdown | a lattice of springs released at once — friction is a field over the sheet, settled at the top and ringing at the bottom, and the ink only prints where the motion dies |

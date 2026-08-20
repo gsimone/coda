@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<!-- A page of justified, unreadable text, and the one river of spaces that runs all the way through it — the escape route made visible, with the caret standing free below the last line. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>escape route</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: rgb(233, 231, 226); }
+  body { display: flex; align-items: center; justify-content: center; }
+  #sheet { box-shadow: 0 6px 32px rgba(30, 28, 24, 0.18); }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script>
+// oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+function oklch(L, C, H) {
+  const h = (H * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lin = [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((x) => {
+    const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  });
+}
+
+// Quiet field + loud accent
+const PAPER = oklch(0.97, 0.012, 85);
+const INK = oklch(0.3, 0.018, 272);
+const INK_FAINT = oklch(0.62, 0.012, 272);
+const EMBER = oklch(0.66, 0.17, 45);
+
+const W = 794, H = 1123;
+const MX = 84, TOP = 96, BOTTOM = 992;
+const FONT_H = 12, LEADING = 21;
+const RIVER_GAP = 13;
+
+let seed, sheet, riverPath = [], caretX = 0, caretY = 0;
+
+function setup() {
+  const c = createCanvas(W, H);
+  c.parent(document.getElementById("sheet"));
+  pixelDensity(Math.min(2, window.devicePixelRatio || 1));
+  const q = new URLSearchParams(location.search).get("seed");
+  seed = q != null ? Number(q) : Math.floor(Math.random() * 1e9);
+  randomSeed(seed);
+  fitToViewport();
+  window.addEventListener("resize", fitToViewport);
+  sheet = createGraphics(W, H);
+  sheet.pixelDensity(Math.min(2, window.devicePixelRatio || 1));
+  compose(sheet);
+}
+
+function fitToViewport() {
+  const s = Math.min((window.innerWidth - 48) / W, (window.innerHeight - 48) / H, 1);
+  const el = document.getElementById("sheet");
+  el.style.transform = `scale(${s})`;
+  el.style.transformOrigin = "center center";
+}
+
+function compose(g) {
+  g.background(...PAPER);
+
+  const textW = W - 2 * MX;
+  const lines = [];
+  let riverX = MX + textW * random(0.3, 0.7);
+  let y = TOP;
+  let linesLeftInPara = Math.floor(random(5, 11));
+
+  while (y + FONT_H <= BOTTOM) {
+    if (linesLeftInPara === 0) {
+      // paragraph break: half a blank line; the river flows through the silence
+      riverX = drift(riverX, textW);
+      y += LEADING * 0.6;
+      linesLeftInPara = Math.floor(random(5, 11));
+      continue;
+    }
+    riverX = drift(riverX, textW);
+    const ragged = linesLeftInPara === 1;
+    lines.push(makeLine(y, riverX, textW, ragged));
+    y += LEADING;
+    linesLeftInPara -= 1;
+  }
+
+  // words
+  g.noStroke();
+  g.rectMode(CORNER);
+  for (const line of lines) {
+    for (const w of line.words) {
+      g.fill(...INK, 222 + random(-26, 22));
+      g.rect(w.x, line.y, w.w, FONT_H, 2);
+    }
+  }
+
+  // accidental side rivers: faint chains among the ordinary spaces
+  const chains = findAccidentalRivers(lines);
+  for (const chain of chains) {
+    for (const gap of chain) {
+      g.fill(...INK_FAINT, 34);
+      g.rect(gap.cx - gap.w / 2, gap.y - 1.5, gap.w, FONT_H + 3, 3);
+    }
+  }
+
+  // the river: glow, ribbon, and the open gaps themselves
+  riverPath = lines.map((l) => ({ cx: l.river.cx, y: l.y + FONT_H / 2 }));
+  g.noFill();
+  g.stroke(...EMBER, 46);
+  g.strokeWeight(RIVER_GAP * 0.55);
+  ribbon(g, riverPath);
+  g.stroke(...EMBER, 130);
+  g.strokeWeight(1.6);
+  ribbon(g, riverPath);
+  g.noStroke();
+  for (const l of lines) {
+    for (let i = 3; i >= 1; i--) {
+      g.fill(...EMBER, 10 + 8 * (3 - i));
+      g.rect(l.river.cx - RIVER_GAP / 2 - i, l.y - i, RIVER_GAP + 2 * i, FONT_H + 2 * i, 4);
+    }
+    g.fill(...EMBER, 60);
+    g.rect(l.river.cx - RIVER_GAP / 2 + 1, l.y + 1, RIVER_GAP - 2, FONT_H - 2, 2);
+  }
+
+  // where the caret finally stands, outside the text
+  const last = lines[lines.length - 1];
+  caretX = last.river.cx;
+  caretY = last.y + LEADING + 6;
+
+  // signature
+  g.textFont("Courier New");
+  g.textSize(9.5);
+  g.textAlign(LEFT, BASELINE);
+  g.fill(...INK, 135);
+  g.text("escape route · 2026-08-20 · claude", MX, H - 44);
+}
+
+function drift(x, textW) {
+  const next = x + random(-13, 13);
+  return constrain(next, MX + textW * 0.12, MX + textW * 0.88);
+}
+
+function makeLine(y, riverX, textW, ragged) {
+  // lay words with ordinary spaces, forcing one wide space where the river runs
+  const tokens = [];
+  let pen = 0;
+  let riverPlaced = false;
+  const lineW = textW;
+  while (true) {
+    const wordW = random(16, 64) * (random() < 0.12 ? 0.45 : 1);
+    const spaceW = tokens.length === 0 ? 0 : 6.5;
+    const riverLocal = riverX - MX;
+    if (!riverPlaced && pen + spaceW + wordW > riverLocal - 3) {
+      tokens.push({ type: "river", w: RIVER_GAP });
+      pen += RIVER_GAP;
+      riverPlaced = true;
+      continue;
+    }
+    if (pen + spaceW + wordW > lineW) break;
+    if (spaceW > 0) { tokens.push({ type: "space", w: spaceW }); pen += spaceW; }
+    tokens.push({ type: "word", w: wordW });
+    pen += wordW;
+  }
+  if (!riverPlaced) tokens.push({ type: "river", w: RIVER_GAP });
+
+  // justify: hand the right-edge slack to the ordinary spaces
+  const used = tokens.reduce((s, t) => s + t.w, 0);
+  const spaces = tokens.filter((t) => t.type === "space");
+  if (!ragged && spaces.length > 0) {
+    const extra = Math.min((lineW - used) / spaces.length, 9);
+    for (const s of spaces) s.w += extra;
+  }
+
+  let x = MX;
+  const words = [];
+  const spacesOut = [];
+  let river = null;
+  for (const t of tokens) {
+    if (t.type === "word") words.push({ x, w: t.w });
+    if (t.type === "space") spacesOut.push({ cx: x + t.w / 2, w: t.w, y });
+    if (t.type === "river") river = { cx: x + t.w / 2 };
+    x += t.w;
+  }
+  return { y, words, spaces: spacesOut, river };
+}
+
+function findAccidentalRivers(lines) {
+  const chains = [];
+  const claimed = new Set();
+  for (let i = 0; i < lines.length - 3; i++) {
+    for (const start of lines[i].spaces) {
+      if (claimed.has(start)) continue;
+      const chain = [start];
+      let cur = start;
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].spaces
+          .filter((s) => !claimed.has(s) && Math.abs(s.cx - cur.cx) < 8)
+          .sort((a, b) => Math.abs(a.cx - cur.cx) - Math.abs(b.cx - cur.cx))[0];
+        if (next == null) break;
+        chain.push(next);
+        cur = next;
+      }
+      if (chain.length >= 4) {
+        chain.forEach((s) => claimed.add(s));
+        chains.push(chain);
+      }
+    }
+  }
+  return chains.sort((a, b) => b.length - a.length).slice(0, 3);
+}
+
+function ribbon(g, path) {
+  g.beginShape();
+  g.curveVertex(path[0].cx, path[0].y - LEADING);
+  for (const p of path) g.curveVertex(p.cx, p.y);
+  g.curveVertex(path[path.length - 1].cx, path[path.length - 1].y + LEADING);
+  g.endShape();
+}
+
+function draw() {
+  image(sheet, 0, 0, W, H);
+  // the escaped caret, breathing in the margin below the last line
+  const a = 150 + 105 * Math.sin(frameCount * 0.045);
+  noStroke();
+  fill(...EMBER, a);
+  rect(caretX - 1.5, caretY, 3, FONT_H + 3, 1.5);
+}
+</script>
+</body>
+</html>
