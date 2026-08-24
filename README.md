@@ -25,3 +25,4 @@ Made with the [coda skill](https://github.com/gsimone/skills).
 | 2026-08-13 | locus | overlapping compass arcs on warm paper, as if someone kept measuring until the marks themselves became the picture |
 | 2026-08-13 | aperture | a dark mezzotint field of seeded stipple, interrupted by one copper-rimmed circular aperture |
 | 2026-08-13 | folded line | a single closed loop that can never cross itself, grown until it has folded into every corner of the sheet |
+| 2026-08-25 | hinge garden | a garden of jointed stems turns toward an invisible sun, each bend remembering the one before it |

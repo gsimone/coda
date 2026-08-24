@@ -1,0 +1,259 @@
+<!-- A garden of jointed stems turns toward an invisible sun, each bend remembering the one before it. -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hinge garden</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        background: oklch(0.91 0.008 92);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 50% 42%, oklch(0.95 0.006 92), transparent 58%),
+          oklch(0.91 0.008 92);
+      }
+
+      #sheet {
+        width: min(92vw, calc(92vh * 0.707));
+        aspect-ratio: 794 / 1123;
+        line-height: 0;
+        box-shadow:
+          0 2px 5px oklch(0.26 0.02 120 / 0.08),
+          0 18px 52px oklch(0.26 0.02 120 / 0.16);
+      }
+
+      canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="sheet" aria-label="Hinge garden, a generative print"></main>
+    <script>
+      const W = 794;
+      const H = 1123;
+      const SEED = 250825;
+
+      // Quiet field + loud accent, built in OKLCH.
+      const PALETTE_SPEC = {
+        paper: [0.972, 0.012, 92],
+        grain: [0.73, 0.018, 105],
+        ink: [0.27, 0.045, 154],
+        leaf: [0.55, 0.105, 148],
+        dusk: [0.43, 0.035, 236],
+        brass: [0.73, 0.16, 72],
+      };
+
+      let palette;
+
+      function setup() {
+        const canvas = createCanvas(W, H);
+        canvas.parent("sheet");
+        pixelDensity(1);
+        randomSeed(SEED);
+        noiseSeed(SEED);
+        palette = Object.fromEntries(
+          Object.entries(PALETTE_SPEC).map(([name, [L, C, hue]]) => [name, oklch(L, C, hue)]),
+        );
+        noLoop();
+      }
+
+      function draw() {
+        background(...palette.paper);
+        drawPaperGrain();
+        drawLightMemory();
+        drawGarden();
+        drawSignature();
+      }
+
+      function drawPaperGrain() {
+        stroke(...palette.grain, 16);
+        strokeWeight(0.55);
+        for (let i = 0; i < 7600; i += 1) {
+          const x = random(56, W - 56);
+          const y = random(56, H - 56);
+          point(x, y);
+        }
+      }
+
+      function drawLightMemory() {
+        noFill();
+        const sun = { x: 606, y: 186 };
+        for (let ring = 0; ring < 10; ring += 1) {
+          const radius = 38 + ring * 27;
+          stroke(...palette.brass, 18 - ring * 1.05);
+          strokeWeight(0.62);
+          arc(sun.x, sun.y, radius * 2, radius * 2, PI * 0.72, PI * 1.78);
+        }
+      }
+
+      function drawGarden() {
+        const sun = createVector(606, 186);
+        const stems = 57;
+
+        for (let index = 0; index < stems; index += 1) {
+          const t = index / (stems - 1);
+          const rootX = lerp(72, W - 72, t) + random(-5, 5);
+          const rootY = 979 + sin(t * PI * 3.25) * 10 + random(-12, 12);
+          const lengthBias = 1 - abs(t - 0.56) * 0.55;
+          const joints = floor(random(9, 15) * lengthBias + 3);
+          const segmentLength = random(31, 43);
+          const initialAngle = lerp(-PI * 0.64, -PI * 0.36, t) + random(-0.12, 0.12);
+          const points = growStem(rootX, rootY, joints, segmentLength, initialAngle, sun, index);
+
+          drawGhostStem(points, index);
+          drawStem(points, index);
+
+          if (index % 11 === 3 || index % 17 === 8) {
+            drawBloom(points, index);
+          } else {
+            drawTip(points, index);
+          }
+        }
+      }
+
+      function growStem(rootX, rootY, joints, segmentLength, initialAngle, sun, stemIndex) {
+        const points = [createVector(rootX, rootY)];
+        let angle = initialAngle;
+
+        for (let joint = 1; joint <= joints; joint += 1) {
+          const previous = points[points.length - 1];
+          const targetAngle = atan2(sun.y - previous.y, sun.x - previous.x);
+          const memory = lerp(angle, targetAngle, 0.105 + joint * 0.008);
+          const breeze = map(noise(stemIndex * 0.12, joint * 0.24), 0, 1, -0.22, 0.22);
+          angle = memory + breeze;
+
+          const step = segmentLength * random(0.88, 1.12);
+          const next = createVector(previous.x + cos(angle) * step, previous.y + sin(angle) * step);
+          next.x = constrain(next.x, 60, W - 60);
+          next.y = constrain(next.y, 68, H - 72);
+          points.push(next);
+        }
+
+        return points;
+      }
+
+      function drawGhostStem(points, stemIndex) {
+        noFill();
+        stroke(...palette.dusk, 18);
+        strokeWeight(4.6);
+        beginShape();
+        points.forEach((point, index) => {
+          const drift = sin(stemIndex * 1.7 + index * 0.85) * 3.2;
+          vertex(point.x + drift, point.y + 4.5);
+        });
+        endShape();
+      }
+
+      function drawStem(points, stemIndex) {
+        noFill();
+        strokeCap(ROUND);
+        strokeJoin(ROUND);
+
+        for (let index = 1; index < points.length; index += 1) {
+          const previous = points[index - 1];
+          const current = points[index];
+          const progress = index / points.length;
+          const tone = stemIndex % 4 === 0 ? palette.leaf : palette.ink;
+          stroke(...tone, 145 + progress * 70);
+          strokeWeight(lerp(2.4, 0.85, progress));
+          line(previous.x, previous.y, current.x, current.y);
+
+          if (index < points.length - 1) {
+            fill(...palette.paper, 235);
+            stroke(...palette.ink, 130);
+            strokeWeight(0.8);
+            circle(current.x, current.y, lerp(6.2, 3.4, progress));
+          }
+        }
+      }
+
+      function drawTip(points, stemIndex) {
+        const tip = points[points.length - 1];
+        const previous = points[points.length - 2];
+        const angle = atan2(tip.y - previous.y, tip.x - previous.x);
+        const size = 5 + (stemIndex % 4);
+
+        push();
+        translate(tip.x, tip.y);
+        rotate(angle);
+        noStroke();
+        fill(...palette.leaf, 175);
+        ellipse(size * 0.3, -size * 0.3, size * 1.8, size * 0.72);
+        pop();
+      }
+
+      function drawBloom(points, stemIndex) {
+        const tip = points[points.length - 1];
+        const previous = points[points.length - 2];
+        const baseAngle = atan2(tip.y - previous.y, tip.x - previous.x);
+        const petals = 5 + (stemIndex % 3);
+
+        push();
+        translate(tip.x, tip.y);
+        rotate(baseAngle);
+        noStroke();
+        for (let petal = 0; petal < petals; petal += 1) {
+          const angle = (TWO_PI * petal) / petals;
+          push();
+          rotate(angle);
+          fill(...palette.brass, 205);
+          ellipse(7.5, 0, 12, 4.6);
+          pop();
+        }
+        fill(...palette.ink, 210);
+        circle(0, 0, 4.2);
+        pop();
+      }
+
+      function drawSignature() {
+        noStroke();
+        fill(...palette.ink, 145);
+        textFont("ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+        textSize(10);
+        textAlign(RIGHT, BASELINE);
+        text("hinge garden · 2026-08-25 · gpt-5.6-sol", W - 56, H - 28);
+      }
+
+      // oklch(L 0–1, C, H deg) → [r, g, b] each 0–255, clamped to sRGB gamut
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const a = C * Math.cos(h), b = C * Math.sin(h);
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+        const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+        const lin = [
+          +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        return lin.map((x) => {
+          const v = x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+          return Math.round(Math.min(1, Math.max(0, v)) * 255);
+        });
+      }
+    </script>
+  </body>
+</html>
